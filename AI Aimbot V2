@@ -1,0 +1,449 @@
+-- Services and Variables
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local Player = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+-- Aimbot Settings
+local fov = 180
+local isAiming = false
+local trackHead = false -- Default to torso tracking
+local targetClosest = true -- Default to closest target
+local wallCheck = false -- renamed from switchAfterKill
+local teamCheck = false -- New team check option, defaults to off
+local smoothFactor = 0.581 -- Smoothing factor for aim lock
+local UPDATE_INTERVAL = 0.1 -- Update interval for NPC list
+local lastUpdate = 0
+local currentTarget = nil
+
+-- Raycast Parameters (used to ignore local player model)
+local raycastParams = RaycastParams.new()
+raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+raycastParams.FilterDescendantsInstances = {Player.Character}
+
+-- GUI Elements
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AimbotGUI"
+ScreenGui.Parent = game.CoreGui
+ScreenGui.ResetOnSpawn = false
+
+-- Main Toggle Button
+local ToggleButton = Instance.new("TextButton")
+ToggleButton.Name = "AimbotToggle"
+ToggleButton.Size = UDim2.new(0, 120, 0, 40)
+ToggleButton.Position = UDim2.new(0, 10, 0, 10)
+ToggleButton.Text = "AIMBOT: OFF"
+ToggleButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.TextSize = 14
+ToggleButton.Parent = ScreenGui
+
+-- Options Frame
+local OptionsFrame = Instance.new("Frame")
+OptionsFrame.Name = "OptionsFrame"
+OptionsFrame.Size = UDim2.new(0, 220, 0, 190)
+OptionsFrame.Position = UDim2.new(0, 10, 0, 60)
+OptionsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+OptionsFrame.BorderSizePixel = 0
+OptionsFrame.Visible = true
+OptionsFrame.Parent = ScreenGui
+
+-- UI List Layout for options
+local UIListLayout = Instance.new("UIListLayout")
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 5)
+UIListLayout.Parent = OptionsFrame
+
+-- Function to create toggle switches
+local function createToggle(text, default, isModeToggle)
+    local frame = Instance.new("Frame")
+    frame.Size = UDim2.new(1, -10, 0, 30)
+    frame.BackgroundTransparency = 1
+    frame.LayoutOrder = UIListLayout.Padding.Offset + UIListLayout.AbsoluteContentSize.Y
+
+    local label = Instance.new("TextLabel")
+    label.Text = text
+    label.Size = UDim2.new(0.6, 0, 1, 0)
+    label.BackgroundTransparency = 1
+    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.Font = Enum.Font.Gotham
+    label.TextSize = 14
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = frame
+
+    local toggle = Instance.new("TextButton")
+    toggle.Size = UDim2.new(0, 60, 0, 24)
+    toggle.Position = UDim2.new(0.75, 0, 0.12, 0)
+    if isModeToggle then
+        toggle.Text = default and "Closest" or "Random"
+    else
+        toggle.Text = default and "ON" or "OFF"
+    end
+    toggle.BackgroundColor3 = default and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+    toggle.TextColor3 = Color3.fromRGB(20, 20, 20)
+    toggle.Font = Enum.Font.GothamBold
+    toggle.TextSize = 14
+    toggle.Parent = frame
+
+    frame.Parent = OptionsFrame
+    return frame, toggle
+end
+
+-- Create Toggles
+local headTorsoFrame, headTorsoToggle = createToggle("Track Body Part: Torso", trackHead, false)
+local targetModeFrame, targetModeToggle = createToggle("Target Mode: Closest", targetClosest, true)
+local switchAfterKillFrame, switchAfterKillToggle = createToggle("Wall Check", wallCheck, false)
+local teamCheckFrame, teamCheckToggle = createToggle("Team Check", teamCheck, false)
+
+-- Toggle Button Functions
+headTorsoToggle.MouseButton1Click:Connect(function()
+    trackHead = not trackHead
+    headTorsoToggle.Text = trackHead and "Head" or "Torso"
+    headTorsoToggle.BackgroundColor3 = trackHead and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+end)
+
+targetModeToggle.MouseButton1Click:Connect(function()
+    targetClosest = not targetClosest
+    targetModeToggle.Text = targetClosest and "Closest" or "Random"
+    targetModeToggle.BackgroundColor3 = targetClosest and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+end)
+
+switchAfterKillToggle.MouseButton1Click:Connect(function()
+    wallCheck = not wallCheck
+    switchAfterKillToggle.Text = wallCheck and "ON" or "OFF"
+    switchAfterKillToggle.BackgroundColor3 = wallCheck and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+end)
+
+teamCheckToggle.MouseButton1Click:Connect(function()
+    teamCheck = not teamCheck
+    teamCheckToggle.Text = teamCheck and "ON" or "OFF"
+    teamCheckToggle.BackgroundColor3 = teamCheck and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+end)
+
+-- FOV Circle
+local FOVring = Drawing.new("Circle")
+FOVring.Visible = false
+FOVring.Thickness = 2
+FOVring.Color = Color3.fromRGB(128, 0, 128)
+FOVring.Filled = false
+FOVring.Radius = fov
+FOVring.Position = Camera.ViewportSize / 2
+
+-- Helper Functions
+local function isPlayer(obj)
+    if not obj:IsA("Model") or not obj:FindFirstChild("Humanoid") or obj.Humanoid.Health <= 0 then
+        return false
+    end
+
+    local player = Players:GetPlayerFromCharacter(obj)
+    if player then
+        if teamCheck and player.Team == Player.Team then
+            return false
+        end
+        return true
+    end
+    return false
+end
+
+local validPlayers = {}
+
+local function updatePlayers()
+    local tempTable = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isPlayer(obj) then
+            tempTable[obj] = true
+        end
+    end
+
+    -- Remove dead/invalid players more efficiently
+    local newValidPlayers = {}
+    for i = 1, #validPlayers do
+        local player = validPlayers[i]
+        if tempTable[player] then --check if still valid
+            table.insert(newValidPlayers,player)
+        end
+    end
+
+    validPlayers = newValidPlayers --update valid players
+
+    for obj in pairs(tempTable) do
+        local found = false
+        for i = 1, #validPlayers do
+            if validPlayers[i] == obj then
+                found = true
+                break
+            end
+        end
+        if not found then
+            table.insert(validPlayers, obj)
+        end
+    end
+end
+
+
+local function handleDescendant(descendant)
+    if isPlayer(descendant) then
+        -- Check if the descendant is already in the validPlayers table
+        local found = false
+        for i = 1, #validPlayers do
+            if validPlayers[i] == descendant then
+                found = true
+                break
+            end
+        end
+
+        -- If not found, add it to the table
+        if not found then
+            table.insert(validPlayers, descendant)
+        end
+    end
+end
+
+-- Connecting the function that will be called whenever a descendant has been added to workspace
+workspace.DescendantAdded:Connect(handleDescendant)
+
+
+local function updateDrawings()
+    FOVring.Position = Camera.ViewportSize / 2
+    FOVring.Radius = fov * (Camera.ViewportSize.Y / 1080)
+end
+
+local function predictPos(target)
+    local rootPart = target:FindFirstChild("HumanoidRootPart")
+    local head = target:FindFirstChild("Head")
+    local targetPart = trackHead and head or rootPart
+
+    if not targetPart then
+        return target.PrimaryPart and target.PrimaryPart.Position or Vector3.new()
+    end
+
+    return targetPart.Position
+end
+
+local function isVisible(target)
+    local rootPart = target:FindFirstChild("HumanoidRootPart") or target:FindFirstChild("Head")
+    if not rootPart then return false end
+
+    local origin = Camera.CFrame.Position
+    local direction = (rootPart.Position - origin).Unit * 1000
+
+    raycastParams.FilterDescendantsInstances = {Player.Character}
+    local ray = workspace:Raycast(origin, direction, raycastParams)
+
+    if ray and ray.Instance and ray.Instance:IsDescendantOf(target) then
+        return true
+    end
+
+    --Wall check
+    return false
+end
+
+local function getClosestTarget()
+    local nearest = nil
+    local minDistance = math.huge
+    local viewportCenter = Camera.ViewportSize / 2
+
+    for _, player in ipairs(validPlayers) do
+        local humanoid = player:FindFirstChild("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            local predictedPos = predictPos(player)
+            local screenPos, visible = Camera:WorldToViewportPoint(predictedPos)
+
+            if visible and screenPos.Z > 0 then
+                local distance = (Vector2.new(screenPos.X, screenPos.Y) - Vector2.new(viewportCenter.X, viewportCenter.Y)).Magnitude
+                if distance < minDistance and distance < fov and isVisible(player) then
+                    minDistance = distance
+                    nearest = player
+                end
+            end
+        end
+    end
+
+    return nearest
+end
+
+local function getRandomTarget()
+    local candidates = {}
+
+    for _, player in ipairs(validPlayers) do
+        local humanoid = player:FindFirstChild("Humanoid")
+        if humanoid and humanoid.Health > 0 then
+            local predictedPos = predictPos(player)
+            local screenPos, visible = Camera:WorldToViewportPoint(predictedPos)
+
+            if visible and screenPos.Z > 0 and isVisible(player) then
+                table.insert(candidates, player)
+            end
+        end
+    end
+
+    if #candidates > 0 then
+        return candidates[math.random(1, #candidates)]
+    else
+        return nil
+    end
+end
+
+local function getNextTarget()
+    if targetClosest then
+        return getClosestTarget()
+    else
+        return getRandomTarget()
+    end
+end
+
+local function aim(target)
+    if not target then return end
+
+    local partName = trackHead and "Head" or "HumanoidRootPart"
+    local targetPart = target:FindFirstChild(partName)
+    if not targetPart then return end
+
+    local currentCF = Camera.CFrame
+    local targetPosition = predictPos(target)
+    local targetDirection = (targetPosition - currentCF.Position).Unit
+
+    local newLookVector = currentCF.LookVector:Lerp(targetDirection, smoothFactor)
+    Camera.CFrame = CFrame.new(currentCF.Position, currentCF.Position + newLookVector)
+end
+
+-- Main Loop
+RunService.Heartbeat:Connect(function(dt)
+    updateDrawings()
+
+    lastUpdate = lastUpdate + dt
+    if lastUpdate >= UPDATE_INTERVAL then
+        updatePlayers()
+        lastUpdate = 0
+    end
+
+    if isAiming then
+        if not currentTarget or not currentTarget:FindFirstChild("Humanoid") or currentTarget.Humanoid.Health <= 0 then
+            currentTarget = getNextTarget()
+        elseif wallCheck and not isVisible(currentTarget) then
+            currentTarget = getNextTarget()
+        end
+
+        if currentTarget then
+            aim(currentTarget)
+        end
+    else
+        currentTarget = nil
+    end
+end)
+
+-- Toggle Button Clicked
+ToggleButton.MouseButton1Click:Connect(function()
+    isAiming = not isAiming
+    FOVring.Visible = isAiming
+    ToggleButton.Text = "AIMBOT: " .. (isAiming and "ON" or "OFF")
+    ToggleButton.TextColor3 = isAiming and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 255, 255) or Color3.fromRGB(255, 50, 50)
+    if not isAiming then
+        currentTarget = nil
+    end
+end)
+
+-- GUI Dragging
+local dragging = false
+local dragInput = nil
+local dragStart = nil
+local startPos = nil
+
+local function update(input)
+    local delta = input.Position - dragStart
+    ToggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    OptionsFrame.Position = UDim2.new(0, 10 + ToggleButton.Position.X.Offset, 0, 60 + ToggleButton.Position.Y.Offset)
+end
+
+ToggleButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = ToggleButton.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+ToggleButton.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        update(input)
+    end
+end)
+
+-- Initial Player Update
+updatePlayers()
+
+workspace.DescendantRemoving:Connect(function(descendant)
+    if isPlayer(descendant) then
+        for i = #validPlayers, 1, -1 do
+            if validPlayers[i] == descendant then
+                table.remove(validPlayers, i)
+                break
+            end
+        end
+        if currentTarget == descendant then
+            currentTarget = nil
+        end
+    end
+end)
+
+-- Clean Up
+Players.PlayerRemoving:Connect(function()
+    FOVring:Remove()
+    ScreenGui:Destroy()
+end)
+
+-- FOV Size Changer
+local FOVSizeChangerFrame = Instance.new("Frame")
+FOVSizeChangerFrame.Name = "FOVSizeChangerFrame"
+FOVSizeChangerFrame.Size = UDim2.new(1, -10, 0, 30)
+FOVSizeChangerFrame.BackgroundTransparency = 1
+FOVSizeChangerFrame.LayoutOrder = UIListLayout.Padding.Offset + UIListLayout.AbsoluteContentSize.Y
+FOVSizeChangerFrame.Parent = OptionsFrame
+
+local FOVLabel = Instance.new("TextLabel")
+FOVLabel.Name = "FOVLabel"
+FOVLabel.Size = UDim2.new(0.5, 0, 1, 0)
+FOVLabel.Position = UDim2.new(0, 0, 0, 0)
+FOVLabel.BackgroundTransparency = 1
+FOVLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+FOVLabel.Font = Enum.Font.Gotham
+FOVLabel.TextSize = 14
+FOVLabel.TextXAlignment = Enum.TextXAlignment.Left
+FOVLabel.Text = "FOV Size:"
+FOVLabel.Parent = FOVSizeChangerFrame
+
+local FOVTextBox = Instance.new("TextBox")
+FOVTextBox.Name = "FOVTextBox"
+FOVTextBox.Size = UDim2.new(0.4, 0, 0.8, 0)
+FOVTextBox.Position = UDim2.new(0.55, 0, 0.1, 0)
+FOVTextBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+FOVTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
+FOVTextBox.Font = Enum.Font.Gotham
+FOVTextBox.TextSize = 14
+FOVTextBox.Text = tostring(fov)
+FOVTextBox.Parent = FOVSizeChangerFrame
+
+FOVTextBox.FocusLost:Connect(function(enterPressed)
+    local newFOV = tonumber(FOVTextBox.Text)
+    if newFOV and newFOV > 0 and newFOV <= 360 then
+        fov = newFOV
+        FOVring.Radius = fov
+        updateDrawings()
+    else
+        FOVTextBox.Text = tostring(fov)
+    end
+end)
