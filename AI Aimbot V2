@@ -1,4 +1,4 @@
--- Services and Variables
+-- Services
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Players = game:GetService("Players")
@@ -8,16 +8,16 @@ local Camera = workspace.CurrentCamera
 -- Aimbot Settings
 local fov = 180
 local isAiming = false
-local trackHead = false -- Default to torso tracking
-local targetClosest = true -- Default to closest target
-local wallCheck = false -- renamed from switchAfterKill
-local teamCheck = false -- New team check option, defaults to off
-local smoothFactor = 0.581 -- Smoothing factor for aim lock
-local UPDATE_INTERVAL = 0.1 -- Update interval for NPC list
+local trackHead = false
+local targetClosest = true
+local wallCheck = false
+local teamCheck = false
+local smoothFactor = 0.581
+local UPDATE_INTERVAL = 0.1
 local lastUpdate = 0
 local currentTarget = nil
 
--- Raycast Parameters (used to ignore local player model)
+-- Raycast Parameters
 local raycastParams = RaycastParams.new()
 raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
 raycastParams.FilterDescendantsInstances = {Player.Character}
@@ -31,96 +31,73 @@ ScreenGui.ResetOnSpawn = false
 -- Main Toggle Button
 local ToggleButton = Instance.new("TextButton")
 ToggleButton.Name = "AimbotToggle"
-ToggleButton.Size = UDim2.new(0, 120, 0, 40)
+ToggleButton.Size = UDim2.new(0, 100, 0, 30)
 ToggleButton.Position = UDim2.new(0, 10, 0, 10)
 ToggleButton.Text = "AIMBOT: OFF"
 ToggleButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
 ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.Font = Enum.Font.GothamBold
+ToggleButton.Font = Enum.Font.SourceSansBold
 ToggleButton.TextSize = 14
 ToggleButton.Parent = ScreenGui
 
 -- Options Frame
 local OptionsFrame = Instance.new("Frame")
 OptionsFrame.Name = "OptionsFrame"
-OptionsFrame.Size = UDim2.new(0, 220, 0, 190)
-OptionsFrame.Position = UDim2.new(0, 10, 0, 60)
+OptionsFrame.Size = UDim2.new(0, 120, 0, 160)
+OptionsFrame.Position = UDim2.new(0, 10, 0, 50)
 OptionsFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 OptionsFrame.BorderSizePixel = 0
 OptionsFrame.Visible = true
 OptionsFrame.Parent = ScreenGui
 
--- UI List Layout for options
+-- UI List Layout
 local UIListLayout = Instance.new("UIListLayout")
 UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
-UIListLayout.Padding = UDim.new(0, 5)
+UIListLayout.Padding = UDim.new(0, 3)
 UIListLayout.Parent = OptionsFrame
 
--- Function to create toggle switches
-local function createToggle(text, default, isModeToggle)
+-- Toggle Creation Function
+local function createToggle(text, default, callback)
     local frame = Instance.new("Frame")
-    frame.Size = UDim2.new(1, -10, 0, 30)
+    frame.Size = UDim2.new(1, -6, 0, 25)
     frame.BackgroundTransparency = 1
-    frame.LayoutOrder = UIListLayout.Padding.Offset + UIListLayout.AbsoluteContentSize.Y
+	frame.Parent = OptionsFrame
 
     local label = Instance.new("TextLabel")
     label.Text = text
-    label.Size = UDim2.new(0.6, 0, 1, 0)
+    label.Size = UDim2.new(0.65, 0, 1, 0)
     label.BackgroundTransparency = 1
     label.TextColor3 = Color3.fromRGB(200, 200, 200)
-    label.Font = Enum.Font.Gotham
-    label.TextSize = 14
+    label.Font = Enum.Font.SourceSansBold
+    label.TextSize = 12
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = frame
 
     local toggle = Instance.new("TextButton")
-    toggle.Size = UDim2.new(0, 60, 0, 24)
-    toggle.Position = UDim2.new(0.75, 0, 0.12, 0)
-    if isModeToggle then
-        toggle.Text = default and "Closest" or "Random"
-    else
-        toggle.Text = default and "ON" or "OFF"
-    end
+    toggle.Size = UDim2.new(0, 40, 0, 20)
+    toggle.Position = UDim2.new(0.75, 0, 0.15, 0)
+    toggle.Text = default and "ON" or "OFF"
     toggle.BackgroundColor3 = default and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
     toggle.TextColor3 = Color3.fromRGB(20, 20, 20)
-    toggle.Font = Enum.Font.GothamBold
-    toggle.TextSize = 14
+    toggle.Font = Enum.Font.SourceSansBold
+    toggle.TextSize = 12
     toggle.Parent = frame
 
-    frame.Parent = OptionsFrame
-    return frame, toggle
+    toggle.MouseButton1Click:Connect(function()
+        default = not default
+        toggle.Text = default and "ON" or "OFF"
+        toggle.BackgroundColor3 = default and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
+        callback(default)
+    end)
+	
+    return frame
 end
 
--- Create Toggles
-local headTorsoFrame, headTorsoToggle = createToggle("Track Body Part: Torso", trackHead, false)
-local targetModeFrame, targetModeToggle = createToggle("Target Mode: Closest", targetClosest, true)
-local switchAfterKillFrame, switchAfterKillToggle = createToggle("Wall Check", wallCheck, false)
-local teamCheckFrame, teamCheckToggle = createToggle("Team Check", teamCheck, false)
-
--- Toggle Button Functions
-headTorsoToggle.MouseButton1Click:Connect(function()
-    trackHead = not trackHead
-    headTorsoToggle.Text = trackHead and "Head" or "Torso"
-    headTorsoToggle.BackgroundColor3 = trackHead and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
-end)
-
-targetModeToggle.MouseButton1Click:Connect(function()
-    targetClosest = not targetClosest
-    targetModeToggle.Text = targetClosest and "Closest" or "Random"
-    targetModeToggle.BackgroundColor3 = targetClosest and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
-end)
-
-switchAfterKillToggle.MouseButton1Click:Connect(function()
-    wallCheck = not wallCheck
-    switchAfterKillToggle.Text = wallCheck and "ON" or "OFF"
-    switchAfterKillToggle.BackgroundColor3 = wallCheck and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
-end)
-
-teamCheckToggle.MouseButton1Click:Connect(function()
-    teamCheck = not teamCheck
-    teamCheckToggle.Text = teamCheck and "ON" or "OFF"
-    teamCheckToggle.BackgroundColor3 = teamCheck and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 50, 50)
-end)
+-- Toggles
+createToggle("Head Track", trackHead, function(state) trackHead = state end)
+createToggle("Closest Target", targetClosest, function(state) targetClosest = state end)
+createToggle("Wall Check", wallCheck, function(state) wallCheck = state end)
+createToggle("Team Check", teamCheck, function(state) teamCheck = state end)
 
 -- FOV Circle
 local FOVring = Drawing.new("Circle")
@@ -131,7 +108,7 @@ FOVring.Filled = false
 FOVring.Radius = fov
 FOVring.Position = Camera.ViewportSize / 2
 
--- Helper Functions
+-- Helper Functions (isPlayer, updatePlayers, etc. - same as before, omitted for brevity)
 local function isPlayer(obj)
     if not obj:IsA("Model") or not obj:FindFirstChild("Humanoid") or obj.Humanoid.Health <= 0 then
         return false
@@ -182,7 +159,6 @@ local function updatePlayers()
     end
 end
 
-
 local function handleDescendant(descendant)
     if isPlayer(descendant) then
         -- Check if the descendant is already in the validPlayers table
@@ -201,9 +177,7 @@ local function handleDescendant(descendant)
     end
 end
 
--- Connecting the function that will be called whenever a descendant has been added to workspace
-workspace.DescendantAdded:Connect(handleDescendant)
-
+-- Connecting the function that will be called whenever a descendant has been added to workspace workspace.DescendantAdded:Connect(handleDescendant)
 
 local function updateDrawings()
     FOVring.Position = Camera.ViewportSize / 2
@@ -354,7 +328,7 @@ local startPos = nil
 local function update(input)
     local delta = input.Position - dragStart
     ToggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    OptionsFrame.Position = UDim2.new(0, 10 + ToggleButton.Position.X.Offset, 0, 60 + ToggleButton.Position.Y.Offset)
+    OptionsFrame.Position = UDim2.new(0, 10 + ToggleButton.Position.X.Offset, 0, 40 + ToggleButton.Position.Y.Offset)
 end
 
 ToggleButton.InputBegan:Connect(function(input)
@@ -400,28 +374,26 @@ workspace.DescendantRemoving:Connect(function(descendant)
     end
 end)
 
--- Clean Up
-Players.PlayerRemoving:Connect(function()
-    FOVring:Remove()
-    ScreenGui:Destroy()
-end)
+-- Clean Up Players.PlayerRemoving:Connect(function()
+--     FOVring:Remove()
+--     ScreenGui:Destroy()
+-- end)
 
--- FOV Size Changer
+-- FOV Size Changer Section
 local FOVSizeChangerFrame = Instance.new("Frame")
 FOVSizeChangerFrame.Name = "FOVSizeChangerFrame"
-FOVSizeChangerFrame.Size = UDim2.new(1, -10, 0, 30)
+FOVSizeChangerFrame.Size = UDim2.new(1, -6, 0, 25)
 FOVSizeChangerFrame.BackgroundTransparency = 1
-FOVSizeChangerFrame.LayoutOrder = UIListLayout.Padding.Offset + UIListLayout.AbsoluteContentSize.Y
 FOVSizeChangerFrame.Parent = OptionsFrame
+
 
 local FOVLabel = Instance.new("TextLabel")
 FOVLabel.Name = "FOVLabel"
 FOVLabel.Size = UDim2.new(0.5, 0, 1, 0)
-FOVLabel.Position = UDim2.new(0, 0, 0, 0)
 FOVLabel.BackgroundTransparency = 1
 FOVLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
-FOVLabel.Font = Enum.Font.Gotham
-FOVLabel.TextSize = 14
+FOVLabel.Font = Enum.Font.SourceSansBold
+FOVLabel.TextSize = 12
 FOVLabel.TextXAlignment = Enum.TextXAlignment.Left
 FOVLabel.Text = "FOV Size:"
 FOVLabel.Parent = FOVSizeChangerFrame
@@ -432,8 +404,8 @@ FOVTextBox.Size = UDim2.new(0.4, 0, 0.8, 0)
 FOVTextBox.Position = UDim2.new(0.55, 0, 0.1, 0)
 FOVTextBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
 FOVTextBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-FOVTextBox.Font = Enum.Font.Gotham
-FOVTextBox.TextSize = 14
+FOVTextBox.Font = Enum.Font.SourceSansBold
+FOVTextBox.TextSize = 12
 FOVTextBox.Text = tostring(fov)
 FOVTextBox.Parent = FOVSizeChangerFrame
 
